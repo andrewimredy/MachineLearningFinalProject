@@ -1,0 +1,283 @@
+---
+title: "classification_models"
+author: "Andrew Imredy"
+date: "12/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Part IV: Classification
+**Setup: **
+```{r}
+library(tidyverse)
+df <- read.csv('cs_1675_fall2021_finalproject.csv')
+df <- df %>% 
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x5 + x4),
+         t = v1 * v2)
+df <- df %>% 
+  mutate(y = boot::logit(output), event = as.factor(ifelse(output < .33, "y", "n")))
+```
+
+**Let's keep the train control consistent..**
+```{r}
+library(caret)
+my_ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3, classProbs = TRUE, savePredictions = TRUE)
+
+class_metric <- "Accuracy"
+```
+
+###Logistic Regression
+
+**Base features**
+```{r}
+base_logistic_regression <- train(event ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                                  data = df,
+                                  method = "glm",
+                                  family = "binomial",
+                                  preProcess = c("center", "scale"),
+                                  metric = class_metric,
+                                  trControl = my_ctrl
+                                  )
+base_logistic_regression
+```
+**Expanded features**
+```{r}
+exp_logistic_regression <- train(event ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+                                  data = df,
+                                  method = "glm",
+                                  family = "binomial",
+                                  preProcess = c("center", "scale"),
+                                  metric = class_metric,
+                                  trControl = my_ctrl
+                                  )
+exp_logistic_regression
+```
+
+**Best (Basis Spline) from LMs**
+```{r}
+basis_spline_log_reg <- train(event ~ splines::ns(x1, df = 12) + splines::ns(x2, df = 12) + splines::ns(z, df = 12),
+                         data = df,
+                         method = "glm",
+                         family = "binomial",
+                         preProcess = c("center", "scale"),
+                         metric = class_metric,
+                         trControl = my_ctrl
+                         )
+basis_spline_log_reg
+```
+
+**Polynomial basis from LMs**
+```{r}
+basis_poly_log_reg <- train(event ~ x1 + x2 + x5 + z + v5 + I(x1^2) + I(x2^2) + I(x5^2) + I(z^2) + I(v5^2),
+                         data = df,
+                         method = "glm",
+                         family = "binomial",
+                         preProcess = c("center", "scale"),
+                         metric = class_metric,
+                         trControl = my_ctrl
+                         )
+basis_poly_log_reg
+```
+
+###Elastic Net
+**Interactions**
+```{r}
+enet_full_log_reg <- train(event ~ m*((x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + x5 + w + z +t)^2),
+                   data = df,
+                   method = "glmnet",
+                   family = "binomial",
+                   metric = class_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl
+)
+enet_full_log_reg
+ggplot(enet_full_log_reg)
+```
+
+**Polynomial from LMs**
+
+```{r}
+enet_poly_log_reg <- train(event ~ x1 + x2 + x5 + z + v5 + I(x1^2) + I(x2^2) + I(x5^2) + I(z^2) + I(v5^2),
+                   data = df,
+                   method = "glmnet",
+                   family = "binomial",
+                   metric = class_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl
+)
+enet_poly_log_reg
+```
+
+
+###Neural Network
+**base features**
+```{r}
+neural_net_base_class <- train(event ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+              data = df,
+              method = "nnet",
+              family = "binomial",
+              metric = class_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl,
+              trace = FALSE,
+              linout = FALSE
+              )
+neural_net_base_class
+```
+**expanded features**
+```{r}
+neural_net_exp_class <- train(event ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+              data = df,
+              method = "nnet",
+              family = "binomial",
+              metric = class_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl,
+              trace = FALSE,
+              linout = FALSE
+              )
+neural_net_exp_class
+```
+
+###Random Forest
+**Base features**
+```{r}
+rf_base_class <- train(event ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                          data = df,
+                          method = "rf",
+                          family = "binomial",
+                          metric = class_metric,
+                          trControl = my_ctrl,
+                          importance = TRUE
+                          )
+rf_base_class
+```
+
+**Expanded features**
+```{r}
+rf_exp_class <- train(event ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+                          data = df,
+                          method = "rf",
+                          family = "binomial",
+                          metric = class_metric,
+                          trControl = my_ctrl,
+                          importance = TRUE
+                          )
+rf_exp_class
+```
+
+###Gradient Boosted Tree
+**Base features**
+```{r}
+xgb_base_class <- train(event ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                 data = df,
+                 method = "xgbTree",
+                 family = "binomial",
+                 metric = class_metric,
+                 trControl = my_ctrl,
+                 objective = "binary:logistic",
+                 verbose = FALSE)
+xgb_base_class
+```
+
+**Expanded features**
+```{r}
+xgb_exp_class <- train(event ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+                 data = df,
+                 method = "xgbTree",
+                 family = "binomial",
+                 metric = class_metric,
+                 trControl = my_ctrl,
+                 objective = "binary:logistic",
+                 verbose = FALSE)
+xgb_exp_class
+```
+
+```{r}
+plot(xgb_base_class)
+plot(xgb_exp_class)
+```
+Again, deeper trees with more iterations provide better results.
+
+###SVM
+```{r}
+svm_class <- train(event ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m + z,
+             data = df,
+             method = "svmRadial",
+             family = "binomial",
+             metric = class_metric,
+             preProcess = c("center", "scale"),
+             trControl = my_ctrl,
+             verbose = FALSE)
+svm_class
+```
+
+###PLS
+```{r}
+pls_class <- train(event ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + z + m,
+             data = df,
+             method = "pls",
+             family = "binomial",
+             metric = class_metric,
+             preProcess = c("center", "scale"),
+             trControl = my_ctrl,
+             verbose = FALSE)
+pls_class
+```
+
+##Compare models!
+```{r}
+list_of_models <- list(LR_BASE = base_logistic_regression,
+                             LR_EXP = exp_logistic_regression,
+                             LR_POLY = basis_poly_log_reg,
+                             LR_SPLINE = basis_spline_log_reg,
+                             ENET_INT = enet_full_log_reg,
+                             ENET_POLY = enet_poly_log_reg,
+                             NNET_BASE = neural_net_base_class,
+                             NNET_EXP = neural_net_exp_class,
+                             RF_BASE = rf_base_class,
+                             RF_EXP = rf_exp_class,
+                             XGB_BASE = xgb_base_class,
+                             XGB_EXP = xgb_exp_class,
+                             SVM = svm_class,
+                             PLS = pls_class
+                             )
+my_results_class <- resamples(list_of_models)
+dotplot(my_results_class, metric = "Accuracy")
+```
+```{r}
+library(MLeval)
+aucs <- c(
+evalm(base_logistic_regression, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(exp_logistic_regression, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(basis_poly_log_reg, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(basis_spline_log_reg, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(enet_full_log_reg, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(enet_poly_log_reg, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(neural_net_base_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(neural_net_exp_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(rf_base_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(rf_exp_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(xgb_base_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(xgb_exp_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(svm_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"],
+evalm(pls_class, showplots = FALSE, silent = TRUE)$stdres$`Group 1`["AUC-ROC", "Score"]
+)
+
+cbind(names(list_of_models), aucs)
+```
+
+All are pretty good by AUC, but once again, the linear spline model wins out, followed closely by the tree-based methods!
+
+##In conclusion, the spline linear model is the best!
+
+```{r}
+save(basis_spline_log_reg, file = "spline_basis_model_class.Rdata")
+save(xgb_base_class, file = "xgb_base_class.Rdata")
+save(xgb_exp_class, file = "xgb_exp_class.Rdata")
+```

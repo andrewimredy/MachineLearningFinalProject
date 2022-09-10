@@ -1,0 +1,213 @@
+---
+title: "linear_model_1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+df <- read.csv('cs_1675_fall2021_finalproject.csv')
+df <- df %>% 
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x5 + x4),
+         t = v1 * v2)
+df <- df %>% 
+  mutate(y = boot::logit(output))
+```
+
+**Base Features linear additive model: **
+```{r}
+base_additive_model <- df %>% lm(formula = y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5)
+coefplot::coefplot(base_additive_model)
+broom::glance(base_additive_model)
+```
+A very low r-squared. x1 and x2 are the only significant inputs here. 
+
+
+**Base features categorical interaction model: **
+```{r}
+base_categorical_model <- df %>% lm(formula = y ~ m * (x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5))
+coefplot::coefplot(base_categorical_model)
+summary(base_categorical_model)
+broom::glance(base_categorical_model)
+```
+Small r-squared again. The significant inputs are mD and mD:x4
+
+**Base pairwise interaction model:**
+```{r}
+base_pairwise_model <- df %>% lm(formula = y ~ (x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5)^2)
+coefplot::coefplot(base_pairwise_model)
+summary(base_pairwise_model)
+broom::glance(base_pairwise_model)
+```
+Marginally better r-squared, many significant inputs. The most significant are x1:x2, x1:v1, x1:v5.
+
+**Choose expanded feature set: **
+Based on the correlation plot from data exploration 2, I'll discard base inputs with high correlation to derived inputs. My expanded feature set is therefore:
+
+x5, w, z, t, x4, v3, v4, v5
+
+**Expanded linear additive model:**
+```{r}
+exp_linear_model <- df %>% lm(formula = y ~ x4 + x5 + v3 + v4 + v5 + w + z + t)
+coefplot::coefplot(exp_linear_model)
+summary(exp_linear_model)
+broom::glance(exp_linear_model)
+```
+Significant improvement in r-squared compared to base models, but still low overall. Most significant terms are x5 and z. x4 and v5 also significant.
+
+**Expanded categorical model:**
+```{r}
+exp_categorical_model <- df %>% lm(formula = y ~ m*(x4 + x5 + v3 + v4 + v5 + w + z + t))
+coefplot::coefplot(exp_categorical_model)
+summary(exp_categorical_model)
+broom::glance(exp_categorical_model)
+```
+
+Here, the categorical variable doesn't seem to have a huge effect, as x5 and z are by far the most significant inputs. mD:x4, mE:x5, mC:v3 are also significant, but much less so. Nevertheless, we see marginal improvement in r-squared.
+
+**Expanded pairwise model:**
+```{r}
+exp_pairwise_model <- df %>% lm(formula = y ~ (x4 + x5 + v3 + v4 + v5 + w + z + t)^2)
+coefplot::coefplot(exp_pairwise_model)
+summary(exp_pairwise_model)
+broom::glance(exp_pairwise_model)
+```
+
+Significant inputs include v5, z, x5 (to a lesser degree) and the interactions between them. This is the best model by r-squared thus far.
+
+
+**Basis function 1**
+Let's try a polynomial with significant inputs from above
+```{r}
+basis_1 <- df %>% lm(formula = y ~ x1 + x2 + x5 + z + v5 + I(x1^2) + I(x2^2) + I(x5^2) + I(z^2) + I(v5^2))
+coefplot::coefplot(basis_1)
+summary(basis_1)
+broom::glance(basis_1)
+```
+
+**Basis function 2**
+Okay, how about some splines with the most signficant terms above
+```{r}
+basis_2 <- df %>% lm(formula = y ~ splines::ns(x1, df = 12) + splines::ns(x2, df = 12) + splines::ns(z, df = 12) )
+coefplot::coefplot(basis_2)
+summary(basis_2)
+broom::glance(basis_2)
+```
+Okay this one's pretty good. High r-squared, lower ICs. 
+
+**Basis function 3**
+Let's try adding categorical interactions..
+```{r}
+basis_3 <- df %>% lm(formula = y ~ m * (splines::ns(x1, df = 12) + splines::ns(x2, df = 12) + splines::ns(z, df = 12)))
+coefplot::coefplot(basis_3)
+summary(basis_3)
+broom::glance(basis_3)
+```
+A monstrosity of a model. Slight gains in r-squared at a large cost to BIC, and little growth in adjusted r-squared. I think we went too far...
+
+**Model comparisons: **
+```{r}
+bind_rows(
+broom::glance(base_additive_model) %>% add_column(name = "Base Additive Model", .before = 1),
+broom::glance(base_categorical_model) %>% add_column(name = "Base Categorical Model", .before = 1),
+broom::glance(base_pairwise_model) %>% add_column(name = "Base Pairwise Model", .before = 1),
+broom::glance(exp_linear_model) %>% add_column(name = "Expanded Additive Model", .before = 1),
+broom::glance(exp_categorical_model) %>% add_column(name = "Expanded Categorial Model", .before = 1),
+broom::glance(exp_pairwise_model) %>% add_column(name = "Expanded Pairwise Model", .before = 1),
+broom::glance(basis_1) %>% add_column(name = "Basis fn Model 1", .before = 1),
+broom::glance(basis_2) %>% add_column(name = "Basis fn Model 2", .before = 1),
+broom::glance(basis_3) %>% add_column(name = "Basis fn Model 3", .before = 1),
+)
+```
+
+Of the 9 linear models, Basis Function Model 2 is the best by AIC and BIC, and a very close second by adjusted r-squared. We can also see large jumps in r-squared between each of the 3 categories of model. Basis function Model 3 is the best by r-squared, but is very complex for the marginal performance gains it achieves, and thus suffers in IC scores. 
+
+**Top 3 Model Coefficient Summaries**
+```{r}
+coefplot::coefplot(basis_1)
+coefplot::coefplot(basis_2)
+coefplot::coefplot(basis_3)
+```
+The polynomial model denotes x1^2 and x2^2 as the most significant values, reaching up to +/- 40. The first spline model generally weights x1 and z higher than x2, and its coefficients are all within +/- 8. The big spline model has many insignificant terms, but also a similar range for coefficients and high weights on x1.
+
+**PART 2: BAYESIAN MODELS**
+
+Let's put a prior on basis fn models 1 and 2, since they performed best. 
+```{r}
+library(rstanarm)
+```
+```{r}
+bayesian_model_polynomial <- stan_glm(formula = y ~ x1 + x2 + x5 + z + v5 + I(x1^2) + I(x2^2) + I(x5^2) + I(z^2) + I(v5^2), data = df, prior = normal(location = 0, scale = 5), seed = 999, verbose = FALSE)
+bayesian_model_spline <- stan_glm(formula = y ~ splines::ns(x1, df = 12) + splines::ns(x2, df = 12) + splines::ns(z, df = 12), data = df, prior = normal(location = 0, scale = 2.5), seed = 999, verbose = FALSE)
+```
+**Compare Polynomial LM and Bayesian**
+```{r}
+summary(bayesian_model_polynomial)
+plot(bayesian_model_polynomial)
+coefplot::coefplot(basis_1)
+loo(bayesian_model_polynomial)
+```
+
+**Compare Spline LM and Bayesian Spline**
+```{r}
+summary(bayesian_model_spline)
+plot(bayesian_model_spline)
+coefplot::coefplot(basis_2)
+loo(bayesian_model_spline)
+```
+
+We can see that the coefficients are slightly constrained towards 0, but the difference between Bayesian and LM models isn't as large as I expected. To evaluate the stan_lm models, I used Leave One Out Information Criterion, which I understand is analogous to AIC. Using this metric, the Bayesian model based on splines is significantly better than the one based on polynomials. 
+I'm not sure if we can directly compare AIC and LOOIC, but if we could, the non-Bayesian spline model would still be best, slightly edging out the Bayesian spline model. 
+
+**Model Predictions: **
+Let's use our two best LM() models..
+Let's use x1 and x2 as our inputs. They're consistently significant, and I don't want to use Z since it derives from x1 and x2.
+
+define prediction function:
+```{r}
+tidy_predict <- function(mod, xnew)
+{
+  pred_df <- predict(mod, xnew, interval = "confidence") %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    dplyr::select(pred = fit, ci_lwr = lwr, ci_upr = upr) %>% 
+    bind_cols(predict(mod, xnew, interval = 'prediction') %>% 
+                as.data.frame() %>% tibble::as_tibble() %>% 
+                dplyr::select(pred_lwr = lwr, pred_upr = upr))
+  
+  xnew %>% bind_cols(pred_df)
+}
+```
+
+
+**Polynomial basis fn model**
+```{r}
+viz_grid <- expand.grid(x1 = seq(from = 0.0, to = 0.61, length.out = 101),
+                        x2 = seq(from = 0.0, to = 0.45, length.out = 6),
+                        
+                        KEEP.OUT.ATTRS = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble() %>% mutate( x5 = 1 - (x1 + x2 + median(df$x3) + median(df$x4)),
+                        z = (x1 + x2)/(median(df$x3) + median(df$x4)),
+                        v5 = median(df$v5))
+
+pred_poly_basis <- tidy_predict(basis_1, viz_grid)
+pred_poly_basis %>% ggplot(mapping = aes(x = x1)) + geom_ribbon(mapping = aes(ymin = pred_lwr, ymax = pred_upr), fill = "orange") + geom_ribbon(mapping = aes(ymin = ci_lwr, ymax = ci_upr), fill = 'grey') + geom_line(mapping = aes(y = pred))+ facet_wrap(pred_poly_basis$x2) + coord_cartesian(ylim = c(-6,9))
+```
+Interesting results.. A positive quadratic relationship exists between the logit-transformed output Y and the input x1. This alighs with the large positive coefficient found on x1^2 in our basis fn model. Interestingly, as x2 gets larger, our condifence interval w.r.t. x1 widens and moves higher, especially at higher values of x1. Furthermore, the predictions are overall higher at middle values of x2, and lower at low or high values of x2, reflecting the negative quadratic relaitonship between Y and x2.
+
+**Spline Basis model**
+```{r}
+viz_grid_2 <- expand.grid(x1 = seq(from = 0.0, to = 0.61, length.out = 101),
+                        x2 = seq(from = 0.0, to = 0.45, length.out = 6),
+                        KEEP.OUT.ATTRS = FALSE)  %>% 
+  as.data.frame() %>% tibble::as_tibble() %>% mutate(z = (x1 + x2)/(median(df$x3) + median(df$x4)))
+pred_spline_basis <- tidy_predict(basis_2, viz_grid_2)
+pred_spline_basis %>% ggplot(mapping = aes(x = x1)) + geom_ribbon(mapping = aes(ymin = pred_lwr, ymax = pred_upr), fill = "orange") + geom_ribbon(mapping = aes(ymin = ci_lwr, ymax = ci_upr), fill = 'grey') + geom_line(mapping = aes(y = pred))+ facet_wrap(pred_spline_basis$x2) + coord_cartesian(ylim = c(-6,9))
+```
+
+**Wow, definitely a more complicated curve. Still concave up, but with a sharp decline from x1=0 to x1=.05, then a gradual rise. Again, increasing values of x2 widen the confidence interval (but not the prediction interval) and shift the output up at higher values of x1. Based on this visualization, x1 of around .25 and x2 of .36 lead to the best results. I suspect the spline model is better than the polynomial since it can generate more complex curves as shown above. **

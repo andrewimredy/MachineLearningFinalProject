@@ -1,0 +1,88 @@
+---
+title: "data_exploration_2"
+output: html_document
+---
+Collaborator: Eyasped Challa
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Okay, lets look at the data a bit more**
+Look at distributions of variables
+```{r}
+library(tidyverse)
+df <- read.csv('cs_1675_fall2021_finalproject.csv')
+df <- df %>% 
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x5 + x4),
+         t = v1 * v2)
+df <- df %>% 
+  mutate(y = boot::logit(output))
+```
+
+```{r}
+df %>% 
+  select(starts_with('x'), m) %>%
+  tibble::rowid_to_column() %>% 
+  pivot_longer(starts_with('x')) %>% 
+  ggplot(mapping = aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~name, scales = 'free_x')
+```
+As with the previous exploration, we see a lot of points around middle values of the Xs.
+
+
+```{r}
+df %>% 
+  select(starts_with('v'), m) %>%
+  tibble::rowid_to_column() %>% 
+  pivot_longer(starts_with('v')) %>% 
+  ggplot(mapping = aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~name, scales = 'free_x')
+```
+
+Similar deal with v1, v2 and v3: wide range of values, but clusters in the middle fo the range. V4 is fat unimodal, v5 has more data towards the extremes. 
+
+What about derived features?
+```{r}
+df %>% ggplot(mapping = aes(x = w)) + geom_histogram(bins = 30)
+```
+
+```{r}
+df %>% ggplot(mapping = aes(x = z)) + geom_histogram(bins = 30)
+```
+
+```{r}
+df %>% ggplot(mapping = aes(x = t)) + geom_histogram(bins = 30)
+```
+
+```{r}
+df %>% ggplot(mapping = aes(x = output)) + geom_histogram(bins = 30)
+```
+
+Lots of totally corroded samples, but also a mode around .2. 
+
+
+```{r}
+df %>% ggplot(mapping = aes(x = y)) + geom_histogram(bins = 30)
+```
+The logit-transformed output, Y, looks much nicer than the plain output. It's unimodal, right-skewed, thanks to those high-corrosion samples
+
+```{r}
+corr_matrix <- df %>% select(!m & !z & !w & !t & !output) %>% cor()
+(corr_matrix)
+corrplot::corrplot(corr = corr_matrix, type = 'upper')
+```
+Nothing crazy here. Makes sense that there's some negative correlation between x inputs, as they're the ingredients. Strange that x2 and x3 are weakly positively correlated. 
+As exploration 1 suggested, no strong correlations between inputs and y.
+X5, as expected from its definition, is negatively correlated with other x inputs. 
+But this is good news, since we don't have to worry much about correlated coefficients. 
+
+```{r}
+derived_input_corr_matrix <- df %>% select(z | w | t | y) %>% cor()
+corrplot::corrplot(corr = derived_input_corr_matrix, type = 'upper')
+```
+Z and W are correlated, but this is because they both depend on x2 and x4 to some degree. Interestingly, Z and Y have the strongest input - output correlation we've seen so far. T has no correlation..

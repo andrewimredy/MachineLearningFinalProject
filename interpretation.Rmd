@@ -1,0 +1,197 @@
+---
+title: "interpretation"
+author: "Andrew Imredy"
+date: "12/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###Which models are best?
+In both the regression and classification, the best model is the 12 DoF spline using x1, x2, and z. Random Forest and XGBoost are the next best, and usually pretty close in performance to each other. 
+
+###Are expanded features better?
+Unclear. Generally, Z is a significant feature, but there's no clear trend of base or expanded feature models performing better. It depends on the specific model, and often the results are similar. One exception is the linear additive model, in which the expanded features are considerably better than the base features.
+
+###Variable Importance
+```{r}
+library(tidyverse)
+library(caret)
+df <- read.csv('cs_1675_fall2021_finalproject.csv')
+df <- df %>% 
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x5 + x4),
+         t = v1 * v2)
+df <- df %>% 
+  mutate(y = boot::logit(output))
+```
+ 
+```{r}
+load("spline_basis_model.Rdata")
+load("poly_basis_model.Rdata")
+load("xgb_base.Rdata")
+load("xgb_exp.Rdata")
+load("rf_base.Rdata")
+load("rf_exp.Rdata")
+load("spline_basis_model_class.Rdata")
+load("xgb_base_class.Rdata")
+load("xgb_exp_class.Rdata")
+```
+
+```{r}
+plot(caret::varImp(basis_spline_lm))
+plot(caret::varImp(basis_poly_lm))
+plot(caret::varImp(xgb_base_tune))
+plot(caret::varImp(xgb_exp))
+plot(caret::varImp(random_forest_base))
+plot(caret::varImp(random_forest_expanded))
+```
+
+Various models reach similar conclusions: x1 is definitively the most important (x1^2 even more so) of the base variables. x2 is a consistent second. Z is massively important among the expanded variables, but W is a distant second. Interestingly, the categorical variable (ie the machine) has very low importance.
+
+##Predictions
+**Use our basis spline model and our base-feature XGBoost**
+```{r}
+df %>% mutate(pred = predict(basis_spline_lm, newdata = df)) %>% 
+  ggplot(mapping = aes(x = x1, y = pred)) +
+  geom_point(aes(color = x2)) +
+  geom_smooth(color = "red") +
+  scale_color_viridis_c(option = 'plasma', name = "X2")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of spline model")
+```
+
+```{r}
+df %>% mutate(pred = predict(xgb_base_tune, newdata = df)) %>% 
+  ggplot(mapping = aes(x = x1, y = pred)) +
+  geom_point(aes(color = x2)) +
+  scale_color_viridis_c(option = 'plasma', name = "X2")+
+  facet_wrap(~m) +
+  geom_smooth(color = "red") +
+  ggtitle("Predictions of base features XGBoost")
+```
+```{r}
+df %>% mutate(pred = predict(xgb_exp, newdata = df)) %>% 
+  ggplot(mapping = aes(x = z, y = pred)) +
+  geom_point(aes(color = w)) +
+  scale_color_viridis_c(option = 'plasma', name = "W")+
+  facet_wrap(~m) +
+  geom_smooth(color = "red") +
+  ggtitle("Predictions of expanded features XGBoost")
+```
+
+```{r}
+df %>% mutate(pred = predict(basis_spline_lm, newdata = df)) %>% 
+  ggplot(mapping = aes(x = z, y = pred)) +
+  geom_point(aes(color = x2)) +
+  scale_color_viridis_c(option = 'plasma', name = "x2")+
+  facet_wrap(~m) +
+  geom_smooth(color = "red") +
+  ggtitle("Predictions of base features XGBoost")
+```
+
+
+```{r}
+df %>% mutate(pred = predict(basis_spline_log_reg, newdata = df, type = "prob")) %>% 
+  ggplot(mapping = aes(x = x1, y = x2)) +
+  geom_point(aes(color = pred$y)) +
+  scale_color_viridis_c(option = 'plasma', name = "Predicted Prob")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of spline logistic regression")
+```
+
+```{r}
+df %>% mutate(pred = predict(xgb_base_class, newdata = df, type = "prob")) %>% 
+  ggplot(mapping = aes(x = x1, y = x2)) +
+  geom_point(aes(color = pred$y)) +
+  scale_color_viridis_c(option = 'plasma', name = "Predicted Prob")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of XGBoost Base features")
+```
+```{r}
+df %>% mutate(pred = predict(xgb_exp_class, newdata = df, type = "prob")) %>% 
+  ggplot(mapping = aes(x = z, y = w)) +
+  geom_point(aes(color = pred$y)) +
+  scale_color_viridis_c(option = 'plasma', name = "Predicted Prob")+
+  facet_wrap(~m) +
+    ggtitle("Predictions of XGBoost Expanded features")
+```
+
+###Optimal Parameters
+Among the best models and most significant inputs, we see that the best results are obtained when x1 is about .2, and when z is about 2. These are the most evident correlations. Additionally, values of W below .5 provide better results. x2 has less obvious correlations, so it probably contributes most as a factor in Z. 
+
+Based on the plots and the variable importance, I don't think the categorical variable greatly affects the result. There are very small differences in the minimum, but they don't seem significant.
+
+Therefore, my reccomendations are to set x1 = .2 and z = 2.
+
+##Bonus Model!!
+We saw that w is significant, but our spline model didn't include w.. Let's see if its inclusion does better?
+```{r}
+bonus_model <- train(y ~ splines::ns(x1, df = 12) + splines::ns(x2, df = 12) + splines::ns(z, df = 12) 
+                     + splines::ns(w, df = 12),
+                         data = df,
+                         method = "lm",
+                         metric = "RMSE",
+                         preProcess = c("center", "scale"),
+                         trControl = trainControl(method = "repeatedcv", number = 5, repeats = 3)
+)
+```
+
+```{r}
+bonus_results <- resamples(list(SPLINE_MODEL = basis_spline_lm,
+                               BONUS_MODEL = bonus_model))
+dotplot(bonus_results)
+summary(bonus_model)
+```
+```{r}
+plot(caret::varImp(bonus_model))
+```
+
+**The addition of w to the spline model results in lower error and better r-squared! Nice!**
+
+```{r}
+df %>% mutate(pred = predict(bonus_model, newdata = df)) %>% 
+  ggplot(mapping = aes(x = x1, y = pred)) +
+  geom_point(aes(color = x2)) +
+  geom_smooth(color = "red") +
+  scale_color_viridis_c(option = 'plasma', name = "X2")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of bonus model")
+```
+
+```{r}
+df %>% mutate(pred = predict(bonus_model, newdata = df)) %>% 
+  ggplot(mapping = aes(x = x2, y = pred)) +
+  geom_point(aes(color = x1)) +
+  geom_smooth(color = "red") +
+  scale_color_viridis_c(option = 'plasma', name = "X1")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of bonus model")
+```
+
+```{r}
+df %>% mutate(pred = predict(bonus_model, newdata = df)) %>% 
+  ggplot(mapping = aes(x = z, y = pred)) +
+  geom_point(aes(color = x2)) +
+  geom_smooth(color = "red") +
+  scale_color_viridis_c(option = 'plasma', name = "X2")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of bonus model")
+```
+
+```{r}
+df %>% mutate(pred = predict(bonus_model, newdata = df)) %>% 
+  ggplot(mapping = aes(x = w, y = pred)) +
+  geom_point(aes(color = x2)) +
+  geom_smooth(color = "red") +
+  scale_color_viridis_c(option = 'plasma', name = "X2")+
+  facet_wrap(~m) +
+  ggtitle("Predictions of bonus model")
+```
+
+**Based on this model, I'd suggest z = 2, and x1 of .18. x2 doesn't have a strong correlation it seems. W is roughly bimodal, with the best values of around .25 and .7**
+
+That's all folks. Thanks for a great class

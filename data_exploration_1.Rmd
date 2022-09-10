@@ -1,0 +1,117 @@
+---
+title: "final_project_data_exploration"
+subtitle: "lets look at data"
+author: "Andrew Imredy"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**To start, lets read in our data and summarize it**
+```{r, read_and_summarize, eval=TRUE}
+library(tidyverse)
+df <- read.csv('cs_1675_fall2021_finalproject.csv')
+summary(df)
+```
+
+Okay, that doesn't tell us all that much. v1, v3, and v5 are an order of magnitude larger than the other inputs. But most inputs are between 0 and 1.
+
+**First transform y to logit(y)**
+```{r, logit}
+df <- df %>% 
+  mutate(y = boot::logit(output))
+```
+
+**Let's make some plots**
+```{r, plot1}
+df %>% ggplot(mapping = aes(x = x1, y = y)) + geom_point()
+```
+
+Interesting. Seems like an upward-facing parabolic trend, with more noise as x1 gets larger. Also some clusters around x1 = .3. Let's try another
+
+```{r, plot2}
+df %>% ggplot(mapping = aes(x = x2, y = y)) + geom_point()
+```
+
+Little visible correlation. But we can see that most values of x2 are < .3, and a lot of observations are nearly 100% corroded.
+
+```{r, plot3}
+df %>% ggplot(mapping = aes(x = x3, y = y)) + geom_point()
+```
+
+Sheesh, not making it easy. A slight negative correlation here if we look at the low-corrosion samples. Also a few clusters around x3 = .25.
+
+```{r, plot4}
+df %>% ggplot(mapping = aes(x = x4, y = y)) + geom_point()
+```
+
+Okay, nothing definitive here, but note that x4 ranges from 0 to 1, whereas other xs are below .5.
+
+**Let's mutate the dataframe to include derived inputs!**
+```{r, mutate}
+df <- df %>% 
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x5 + x4),
+         t = v1 * v2)
+```
+
+**More plots okay**
+```{r, plot5}
+df %>% ggplot(mapping = aes(x = x5, y = y)) + geom_point()
+```
+
+Ooh, looks like a trend. Response rapidly decreases from 0 to .13ish, then levels off or even increases.
+
+```{r, plotv1}
+df %>% ggplot(mapping = aes(x = v1, y = y)) + geom_point()
+```
+
+Not much here imo.
+
+```{r, plotv2}
+df %>% ggplot(mapping = aes(x = v2, y = y)) + geom_point()
+```
+
+eh, nothing much here either
+
+```{r, plotv3}
+df %>% ggplot(mapping = aes(x = v3, y = y)) + geom_point()
+```
+
+All the vs have a similar plot, with some clusters around the median, but no apparent correlation.
+
+```{r, plotv4}
+df %>% ggplot(mapping = aes(x = v4, y = y)) + geom_point()
+```
+
+Very evenly distributed points here. 
+
+```{r, plotw}
+df %>% ggplot(mapping = aes(x = w, y = y)) + geom_point()
+```
+
+Alright, some kind of polynomialish correlation.
+
+```{r, plotz}
+df %>% ggplot(mapping = aes(x = z, y = y)) + geom_point()
+```
+
+A nice parabolic correlation!
+
+```{r, plott}
+df %>% ggplot(mapping = aes(x = t, y = y)) + geom_point()
+```
+
+Nothing apparent..
+
+**Okay, looks like x1, x5, w, and z have the strongest correlations.**
+
+**Hold up, let's try the machine**
+```{r, plotm}
+df %>% ggplot(mapping = aes(x = as.factor(m), y = y)) + geom_boxplot()
+```
+
+Machine D seems best, but it's not a huge difference. Perhaps we should look at the correlations between inputs and output for different machines. But it's 10:30 on a Thursday so we're done with our initial exploration :)

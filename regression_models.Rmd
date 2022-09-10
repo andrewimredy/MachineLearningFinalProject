@@ -1,0 +1,346 @@
+---
+title: "Regression Models"
+author: "Andrew Imredy"
+date: "12/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part III: Regression Models
+
+**Setup: **
+```{r}
+library(tidyverse)
+df <- read.csv('cs_1675_fall2021_finalproject.csv')
+df <- df %>% 
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x5 + x4),
+         t = v1 * v2)
+df <- df %>% 
+  mutate(y = boot::logit(output))
+```
+
+**Let's use 5-fold x3 Cross-Validation to train and RMSE as our metric**
+```{r}
+library(caret)
+my_ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3)
+
+my_metric <- "RMSE"
+```
+
+
+### Linear Models
+
+**Base features**
+```{r}
+set.seed(999)
+base_feature_lm <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                         data = df,
+                         method = "lm",
+                         metric = my_metric,
+                         preProcess = c("center", "scale"),
+                         trControl = my_ctrl
+                         )
+base_feature_lm
+```
+
+**Expanded features**
+```{r}
+expanded_feature_lm <- train(y ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+                         data = df,
+                         method = "lm",
+                         metric = my_metric,
+                         preProcess = c("center", "scale"),
+                         trControl = my_ctrl
+                         )
+expanded_feature_lm
+```
+
+**Best (Basis Spline) from LMs**
+```{r}
+basis_spline_lm <- train(y ~ splines::ns(x1, df = 12) + splines::ns(x2, df = 12) + splines::ns(z, df = 12),
+                         data = df,
+                         method = "lm",
+                         metric = my_metric,
+                         preProcess = c("center", "scale"),
+                         trControl = my_ctrl,
+                         )
+basis_spline_lm
+```
+
+**Second-best (Basis Polynomial) from LMs**
+```{r}
+basis_poly_lm <- train(y ~ x1 + x2 + x5 + z + v5 + I(x1^2) + I(x2^2) + I(x5^2) + I(z^2) + I(v5^2),
+                         data = df,
+                         method = "lm",
+                         metric = my_metric,
+                         preProcess = c("center", "scale"),
+                         trControl = my_ctrl
+                         )
+basis_poly_lm
+```
+
+NB: r-squared seems to be slightly lower with Caret than with LM. More generalized perhaps?
+
+###Elastic Net
+**Interactions**
+```{r}
+enet_full <- train(y ~ m*((x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + x5 + w + z +t)^2),
+                   data = df,
+                   method = "glmnet",
+                   metric = my_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl
+)
+enet_full
+ggplot(enet_full)
+```
+Alpha best at 1, so full Lasso.
+
+Let's tune it!
+```{r}
+my_lambda_grid <- exp(seq(log(min(enet_full$results$lambda)),
+                          log(max(enet_full$results$lambda)),
+                          length.out = 25))
+enet_grid <- expand.grid(alpha = seq(0.1, 0.9, by = 0.1),
+                         lambda = my_lambda_grid)
+enet_full_tune <- train(y ~ m*((x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + x5 + w + z +t)^2),
+                        data = df,
+                        method = "glmnet",
+                        tuneGrid = enet_grid,
+                        metric = my_metric,
+                        preProcess = c("center", "scale"),
+                        trControl = my_ctrl)
+
+plot(enet_full_tune, xTrans=log)
+```
+
+```{r}
+plot(enet_full_tune$finalModel, xvar='lambda', label=TRUE)
+enet_full_tune$bestTune
+```
+Okay, again, high alpha is better.
+
+
+**Polynomial from LMs**
+```{r}
+enet_poly <- train(y ~ x1 + x2 + x5 + z + v5 + I(x1^2) + I(x2^2) + I(x5^2) + I(z^2) + I(v5^2),
+                   data = df,
+                   method = "glmnet",
+                   metric = my_metric,
+                   preProcess = c("center", "scale"),
+                   trControl = my_ctrl
+)
+enet_poly
+```
+Similar to above, but smaller lambda..
+
+###Neural Net
+```{r}
+neural_net_base <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+              data = df,
+              method = "nnet",
+              metric = my_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl,
+              trace = FALSE,
+              linout = FALSE
+              )
+neural_net_base
+```
+Interesting.. None of the results are great, but larger decay is better..
+
+```{r}
+neural_net_expanded <- train(y ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+              data = df,
+              method = "nnet",
+              metric = my_metric,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl,
+              trace = FALSE,
+              linout = FALSE
+              )
+neural_net_expanded
+```
+
+Let's try a tune?
+```{r}
+nnet_grid <- expand.grid(size = c(2, 4, 6, 8, 10, 12),
+                         decay = exp(seq(-6, 2, length.out = 13)))
+neural_net_expanded_tune <- train(y ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+              data = df,
+              method = "nnet",
+              metric = my_metric,
+              tuneGrid = nnet_grid,
+              preProcess = c("center", "scale"),
+              trControl = my_ctrl,
+              trace = FALSE,
+              linout = FALSE
+              )
+```
+Wow that took a long time..
+
+```{r}
+plot(neural_net_expanded_tune, xTrans = log)
+```
+Interesting.. The neural net with 2 hidden units actually achieves the best performance around decay = exp(-2). Perhaps the more complex ones end up overfitting.
+
+
+###Random Forest
+```{r}
+random_forest_base <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                            data = df,
+                            method = "rf",
+                            metric = my_metric,
+                            trControl = my_ctrl,
+                            importance = TRUE
+                            )
+random_forest_base
+```
+
+```{r}
+random_forest_expanded <- train(y ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+                                data = df,
+                                method = "rf",
+                                metric = my_metric,
+                                trControl = my_ctrl,
+                                importance = TRUE)
+random_forest_expanded
+```
+
+Base features random forest achieves pretty good performance..
+
+###GB Tree
+```{r}
+xgb_base <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                 data = df,
+                 method = "xgbTree",
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+xgb_base
+xgb_base$bestTune
+```
+```{r}
+plot(xgb_base)
+```
+Deeper trees perform better across the board. More iterations are ususally better. The best tune has depth of 3, eta of .3, and subsample of 1. 
+
+```{r}
+xgb_exp <- train(y ~ x4 + x5 + v3 + v4 + v5 + w + z + t + m,
+                 data = df,
+                 method = "xgbTree",
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+xgb_exp
+xgb_exp$bestTune
+plot(xgb_exp)
+```
+Huh, this one usually does better with a tree depth of 2. 
+Let's evaluate their r-squared and RMSE:
+```{r}
+max(xgb_base$results$Rsquared)
+max(xgb_exp$results$Rsquared)
+min(xgb_base$results$RMSE)
+min(xgb_exp$results$RMSE)
+```
+
+The base feature XGB is marginally better in terms of RMSE, but still doesn't beat the linear models in terms of r-squared.
+
+Let's overheat my computer right quick and tune base XGB
+```{r}
+xgb_grid <- expand.grid(nrounds = seq(100, 700, by = 100),
+                        max_depth = c(3, 4, 5),
+                        eta = c(0.5*xgb_base$bestTune$eta, xgb_base$bestTune$eta),
+                        gamma = xgb_base$bestTune$gamma,
+                        colsample_bytree = xgb_base$bestTune$colsample_bytree,
+                        min_child_weight = xgb_base$bestTune$min_child_weight,
+                        subsample = xgb_base$bestTune$subsample)
+```
+
+```{r}
+xgb_base_tune <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m,
+                 data = df,
+                 method = "xgbTree",
+                 tuneGrid = xgb_grid,
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror',
+                 verbose = FALSE)
+plot(xgb_base_tune)
+```
+
+Nice tune achieved with depth of 5, many iterations. However, it still doesn't beat the spline basis linear model in terms of RMSE...
+
+###Support Vector Machine
+
+```{r}
+svm <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m + z,
+             data = df,
+             method = "svmRadial",
+             metric = my_metric,
+             preProcess = c("center", "scale"),
+             trControl = my_ctrl,
+             verbose = FALSE)
+svm
+```
+Okay, decent performance actually. I tried with base features, got poor performance, then added Z and got better performance. 
+
+
+###Partial Least Squares
+Let's put some correlated variables in here
+```{r}
+pls_grid <- expand.grid(ncomp = 1:5)
+pls <- train(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5 + m + z,
+             data = df,
+             method = "pls",
+             metric = my_metric,
+             tuneGrid = pls_grid,
+             preProcess = c("center", "scale"),
+             trControl = my_ctrl,
+             verbose = FALSE)
+pls
+```
+Pretty poor performance actually...
+
+##Compare models!
+```{r}
+my_results <- resamples(list(LM_BASE = base_feature_lm,
+                             LM_EXP = expanded_feature_lm,
+                             LM_POLY = basis_poly_lm,
+                             LM_SPLINE = basis_spline_lm,
+                             ENET_INT = enet_full_tune,
+                             ENET_POLY = enet_poly,
+                             NNET_BASE = neural_net_base,
+                             NNET_EXP = neural_net_expanded_tune,
+                             RF_BASE = random_forest_base,
+                             RF_EXP = random_forest_expanded,
+                             XGB_BASE = xgb_base_tune,
+                             XGB_EXP = xgb_exp,
+                             SVM = svm,
+                             PLS = pls
+                             ))
+dotplot(my_results, metric = "RMSE")
+dotplot(my_results, metric = "Rsquared")
+```
+
+Interestingly, no model is better than the linear model consisting of 12th degree splines on x1, x2, and z. Tree-based models using the base features, namely XGBoost and Random Forest, also perform well by both metrics; using the expanded features they perform slightly worse. 
+
+##In conclusion, the spline basis function linear model using x1, x2, and z is still the best model!
+
+Save models..
+```{r}
+save(basis_spline_lm, file = "spline_basis_model.Rdata")
+save(xgb_base_tune, file = "xgb_base.Rdata")
+save(xgb_exp, file = "xgb_exp.Rdata")
+```
+
+```{r}
+save(basis_poly_lm, file = "poly_basis_model.Rdata")
+```
+
